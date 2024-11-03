@@ -50,13 +50,13 @@
 #define AC3_MAX_CHANNELS 6
 #define AC3_MAX_CODED_FRAME_SIZE 3840
 #define AC3_FRAME_SIZE (6  * 256)
-const static uint16_t ac3_bitrate_tab[19] = {
+static const uint16_t ac3_bitrate_tab[19] = {
     32, 40, 48, 56, 64, 80, 96, 112, 128,
     160, 192, 224, 256, 320, 384, 448, 512, 576, 640
 };
 
 struct f_opts {
-    int add_iec61937_header;
+    bool add_iec61937_header;
     int bit_rate;
     int min_channel_num;
     char *encoder;
@@ -103,17 +103,20 @@ static bool reinit(struct mp_filter *f)
     if (!bit_rate && chmap.num < AC3_MAX_CHANNELS + 1)
         bit_rate = default_bit_rate[chmap.num];
 
-    avcodec_close(s->lavc_actx);
+    avcodec_free_context(&s->lavc_actx);
+    s->lavc_actx = avcodec_alloc_context3(s->lavc_acodec);
+    if (!s->lavc_actx) {
+        MP_ERR(f, "Audio LAVC, couldn't reallocate context!\n");
+        return false;
+    }
+
+    if (mp_set_avopts(f->log, s->lavc_actx, s->opts->avopts) < 0)
+        return false;
 
     // Put sample parameters
     s->lavc_actx->sample_fmt = af_to_avformat(format);
 
-#if !HAVE_AV_CHANNEL_LAYOUT
-    s->lavc_actx->channels = chmap.num;
-    s->lavc_actx->channel_layout = mp_chmap_to_lavc(&chmap);
-#else
     mp_chmap_to_av_layout(&s->lavc_actx->ch_layout, &chmap);
-#endif
     s->lavc_actx->sample_rate = rate;
     s->lavc_actx->bit_rate = bit_rate;
 
@@ -131,18 +134,18 @@ static bool reinit(struct mp_filter *f)
     return true;
 }
 
-static void reset(struct mp_filter *f)
+static void af_lavcac3enc_reset(struct mp_filter *f)
 {
     struct priv *s = f->priv;
 
     TA_FREEP(&s->in_frame);
 }
 
-static void destroy(struct mp_filter *f)
+static void af_lavcac3enc_destroy(struct mp_filter *f)
 {
     struct priv *s = f->priv;
 
-    reset(f);
+    af_lavcac3enc_reset(f);
     av_packet_free(&s->lavc_pkt);
     avcodec_free_context(&s->lavc_actx);
 }
@@ -153,7 +156,7 @@ static void swap_16(uint16_t *ptr, size_t size)
         ptr[n] = av_bswap16(ptr[n]);
 }
 
-static void process(struct mp_filter *f)
+static void af_lavcac3enc_process(struct mp_filter *f)
 {
     struct priv *s = f->priv;
 
@@ -187,9 +190,6 @@ static void process(struct mp_filter *f)
         case MP_FRAME_AUDIO:
             TA_FREEP(&s->in_frame);
             s->in_frame = input.data;
-            frame = mp_frame_to_av(input, NULL);
-            if (!frame)
-                goto error;
             if (mp_aframe_get_channels(s->in_frame) < s->opts->min_channel_num) {
                 // Just pass it through.
                 s->in_frame = NULL;
@@ -200,6 +200,9 @@ static void process(struct mp_filter *f)
                 if (!reinit(f))
                     goto error;
             }
+            frame = mp_frame_to_av(input, NULL);
+            if (!frame)
+                goto error;
             break;
         default: goto error; // unexpected packet type
         }
@@ -273,24 +276,15 @@ error:
 static const struct mp_filter_info af_lavcac3enc_filter = {
     .name = "lavcac3enc",
     .priv_size = sizeof(struct priv),
-    .process = process,
-    .reset = reset,
-    .destroy = destroy,
+    .process = af_lavcac3enc_process,
+    .reset = af_lavcac3enc_reset,
+    .destroy = af_lavcac3enc_destroy,
 };
 
 static void add_chmaps_to_autoconv(struct mp_filter *f,
                                    struct mp_autoconvert *conv,
                                    const struct AVCodec *codec)
 {
-#if !HAVE_AV_CHANNEL_LAYOUT
-    const uint64_t *lch = codec->channel_layouts;
-    for (int n = 0; lch && lch[n]; n++) {
-        struct mp_chmap chmap = {0};
-        mp_chmap_from_lavc(&chmap, lch[n]);
-        if (mp_chmap_is_valid(&chmap))
-            mp_autoconvert_add_chmap(conv, &chmap);
-    }
-#else
     const AVChannelLayout *lch = codec->ch_layouts;
     for (int n = 0; lch && lch[n].nb_channels; n++) {
         struct mp_chmap chmap = {0};
@@ -307,7 +301,6 @@ static void add_chmaps_to_autoconv(struct mp_filter *f,
         if (mp_chmap_is_valid(&chmap))
             mp_autoconvert_add_chmap(conv, &chmap);
     }
-#endif
 }
 
 static struct mp_filter *af_lavcac3enc_create(struct mp_filter *parent,
@@ -349,14 +342,7 @@ static struct mp_filter *af_lavcac3enc_create(struct mp_filter *parent,
     // For this one, we require the decoder to export lists of all supported
     // parameters. (Not all decoders do that, but the ones we're interested
     // in do.)
-    if (!s->lavc_acodec->sample_fmts ||
-#if !HAVE_AV_CHANNEL_LAYOUT
-        !s->lavc_acodec->channel_layouts
-#else
-        !s->lavc_acodec->ch_layouts
-#endif
-        )
-    {
+    if (!s->lavc_acodec->sample_fmts || !s->lavc_acodec->ch_layouts) {
         MP_ERR(f, "Audio encoder doesn't list supported parameters.\n");
         goto error;
     }
@@ -418,13 +404,13 @@ const struct mp_user_filter_entry af_lavcac3enc = {
         .name = "lavcac3enc",
         .priv_size = sizeof(OPT_BASE_STRUCT),
         .priv_defaults = &(const OPT_BASE_STRUCT) {
-            .add_iec61937_header = 1,
+            .add_iec61937_header = true,
             .bit_rate = 640,
             .min_channel_num = 3,
             .encoder = "ac3",
         },
         .options = (const struct m_option[]) {
-            {"tospdif", OPT_FLAG(add_iec61937_header)},
+            {"tospdif", OPT_BOOL(add_iec61937_header)},
             {"bitrate", OPT_CHOICE(bit_rate,
                 {"auto", 0}, {"default", 0}), M_RANGE(32, 640)},
             {"minch", OPT_INT(min_channel_num), M_RANGE(2, 6)},

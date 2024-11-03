@@ -17,11 +17,8 @@
 
 #include <assert.h>
 #include <string.h>
-#include <strings.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
-#include <dirent.h>
 #include <math.h>
 #include <stdint.h>
 
@@ -51,7 +48,7 @@
 // All these are generated from player/javascript/*.js
 static const char *const builtin_files[][3] = {
     {"@/defaults.js",
-#   include "generated/player/javascript/defaults.js.inc"
+#   include "player/javascript/defaults.js.inc"
     },
     {0}
 };
@@ -535,8 +532,7 @@ static int s_load_javascript(struct mp_script_args *args)
     js_Alloc alloc_fn = NULL;
     void *actx = NULL;
 
-    char *mem_report = getenv("MPV_LEAK_REPORT");
-    if (mem_report && strcmp(mem_report, "1") == 0) {
+    if (args->mpctx->opts->js_memory_report) {
         alloc_fn = mp_js_alloc;
         actx = ctx;
     }
@@ -696,6 +692,13 @@ static void script_get_property(js_State *J, void *af)
         add_af_mpv_alloc(af, res);
     if (!pushed_error(J, e, 2))
         js_pushstring(J, res);
+}
+
+// args: name
+static void script_del_property(js_State *J)
+{
+    int e = mpv_del_property(jclient(J), js_tostring(J, 1));
+    push_status(J, e);
 }
 
 // args: name [,def]
@@ -1064,7 +1067,7 @@ static int get_obj_properties(void *ta_ctx, char ***keys, js_State *J, int idx)
 static bool same_as_int64(double d)
 {
     // The range checks also validly filter inf and nan, so behavior is defined
-    return d >= INT64_MIN && d <= INT64_MAX && d == (int64_t)d;
+    return d >= INT64_MIN && d <= (double) INT64_MAX && d == (int64_t)d;
 }
 
 static int jsL_checkint(js_State *J, int idx)
@@ -1078,7 +1081,7 @@ static int jsL_checkint(js_State *J, int idx)
 static uint64_t jsL_checkuint64(js_State *J, int idx)
 {
     double d = js_tonumber(J, idx);
-    if (!(d >= 0 && d <= UINT64_MAX))
+    if (!(d >= 0 && d <= (double) UINT64_MAX))
         js_error(J, "uint64 out of range at index %d", idx);
     return d;
 }
@@ -1171,6 +1174,7 @@ static const struct fn_entry main_fns[] = {
     AF_ENTRY(command_native, 2),
     AF_ENTRY(_command_native_async, 2),
     FN_ENTRY(_abort_async_command, 1),
+    FN_ENTRY(del_property, 1),
     FN_ENTRY(get_property_bool, 2),
     FN_ENTRY(get_property_number, 2),
     AF_ENTRY(get_property_native, 2),
@@ -1249,7 +1253,7 @@ static void add_functions(js_State *J, struct script_ctx *ctx)
 
 // main export of this file, used by cplayer to load js scripts
 const struct mp_scripting mp_scripting_js = {
-    .name = "javascript",
+    .name = "js",
     .file_ext = "js",
     .load = s_load_javascript,
 };

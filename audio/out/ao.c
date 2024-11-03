@@ -40,6 +40,7 @@ extern const struct ao_driver audio_out_audiotrack;
 extern const struct ao_driver audio_out_audiounit;
 extern const struct ao_driver audio_out_coreaudio;
 extern const struct ao_driver audio_out_coreaudio_exclusive;
+extern const struct ao_driver audio_out_avfoundation;
 extern const struct ao_driver audio_out_rsound;
 extern const struct ao_driver audio_out_pipewire;
 extern const struct ao_driver audio_out_sndio;
@@ -64,6 +65,9 @@ static const struct ao_driver * const audio_out_drivers[] = {
 #endif
 #if HAVE_COREAUDIO
     &audio_out_coreaudio,
+#endif
+#if HAVE_AVFOUNDATION
+    &audio_out_avfoundation,
 #endif
 #if HAVE_PIPEWIRE
     &audio_out_pipewire,
@@ -102,12 +106,11 @@ static const struct ao_driver * const audio_out_drivers[] = {
 #endif
     &audio_out_pcm,
     &audio_out_lavc,
-    NULL
 };
 
 static bool get_desc(struct m_obj_desc *dst, int index)
 {
-    if (index >= MP_ARRAY_SIZE(audio_out_drivers) - 1)
+    if (index >= MP_ARRAY_SIZE(audio_out_drivers))
         return false;
     const struct ao_driver *ao = audio_out_drivers[index];
     *dst = (struct m_obj_desc) {
@@ -238,7 +241,7 @@ static struct ao *ao_init(bool probing, struct mpv_global *global,
     } else {
         ao->sstride *= ao->channels.num;
     }
-    ao->bps = ao->samplerate * ao->sstride;
+    ao->bps = (int64_t)ao->samplerate * ao->sstride;
 
     if (ao->device_buffer <= 0 && ao->driver->write) {
         MP_ERR(ao, "Device buffer size not set.\n");
@@ -313,7 +316,7 @@ struct ao *ao_init_best(struct mpv_global *global,
     }
 
     if (autoprobe) {
-        for (int n = 0; audio_out_drivers[n]; n++) {
+        for (int n = 0; n < MP_ARRAY_SIZE(audio_out_drivers); n++) {
             const struct ao_driver *driver = audio_out_drivers[n];
             if (driver == &audio_out_null)
                 break;
@@ -521,7 +524,7 @@ struct ao_device_list *ao_hotplug_get_device_list(struct ao_hotplug *hp,
         }
     }
 
-    for (int n = 0; audio_out_drivers[n]; n++) {
+    for (int n = 0; n < MP_ARRAY_SIZE(audio_out_drivers); n++) {
         const struct ao_driver *d = audio_out_drivers[n];
         if (d == &audio_out_null)
             break; // don't add unsafe/special entries
@@ -613,7 +616,7 @@ void ao_set_gain(struct ao *ao, float gain)
 
 #define MUL_GAIN_f(d, num_samples, gain)                                        \
     for (int n = 0; n < (num_samples); n++)                                     \
-        (d)[n] = MPCLAMP(((d)[n]) * (gain), -1.0, 1.0)
+        (d)[n] = (d)[n] * (gain)
 
 static void process_plane(struct ao *ao, void *data, int num_samples)
 {
@@ -702,7 +705,7 @@ static void convert_plane(int type, void *data, int num_samples)
         break;
     }
     default:
-        abort();
+        MP_ASSERT_UNREACHABLE();
     }
 }
 

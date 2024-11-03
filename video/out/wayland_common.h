@@ -22,19 +22,24 @@
 #include "input/event.h"
 #include "vo.h"
 
-struct wayland_opts {
-    int configure_bounds;
-    int disable_vsync;
-    int edge_pixels_pointer;
-    int edge_pixels_touch;
+struct vo_wayland_seat;
+
+typedef struct {
+    uint32_t format;
+    uint32_t padding;
+    uint64_t modifier;
+} compositor_format;
+
+struct drm_format {
+    uint32_t format;
+    uint64_t modifier;
 };
 
 struct vo_wayland_state {
-    struct m_config_cache   *vo_opts_cache;
+    struct m_config_cache   *opts_cache;
     struct mp_log           *log;
-    struct mp_vo_opts       *vo_opts;
+    struct mp_vo_opts       *opts;
     struct vo               *vo;
-    struct wayland_opts     *opts;
     struct wl_callback      *frame_callback;
     struct wl_compositor    *compositor;
     struct wl_subcompositor *subcompositor;
@@ -42,62 +47,87 @@ struct vo_wayland_state {
     struct wl_registry      *registry;
     struct wl_shm           *shm;
     struct wl_surface       *surface;
+    struct wl_surface       *osd_surface;
+    struct wl_subsurface    *osd_subsurface;
     struct wl_surface       *video_surface;
+    struct wl_surface       *callback_surface;
     struct wl_subsurface    *video_subsurface;
 
     /* Geometry */
     struct mp_rect geometry;
-    struct mp_rect vdparams;
     struct mp_rect window_size;
     struct wl_list output_list;
     struct vo_wayland_output *current_output;
     int bounded_height;
     int bounded_width;
-    int gcd;
     int reduced_height;
     int reduced_width;
-    int toplevel_width;
-    int toplevel_height;
 
     /* State */
     bool activated;
-    bool has_keyboard_input;
     bool focused;
     bool frame_wait;
+    bool geometry_configured;
     bool hidden;
+    bool initial_size_hint;
+    bool locked_size;
+    bool need_rescale;
+    bool reconfigured;
+    bool resizing;
+    bool scale_configured;
     bool state_change;
+    bool tiled;
     bool toplevel_configured;
     int display_fd;
-    int mouse_unscaled_x;
-    int mouse_unscaled_y;
     int mouse_x;
     int mouse_y;
     int pending_vo_events;
-    int scaling;
+    int pending_scaling;   // base 120
+    int scaling;           // base 120
+    double scaling_factor; // wl->scaling divided by 120
+    int resizing_constraint;
     int timeout_count;
     int wakeup_pipe[2];
+
+    /* content-type */
+    struct wp_content_type_manager_v1 *content_type_manager;
+    struct wp_content_type_v1 *content_type;
+    int current_content_type;
+
+    /* cursor-shape */
+    /* TODO: unvoid these if required wayland protocols is bumped to 1.32+ */
+    void *cursor_shape_manager;
+
+    /* fractional-scale */
+    struct wp_fractional_scale_manager_v1 *fractional_scale_manager;
+    struct wp_fractional_scale_v1 *fractional_scale;
 
     /* idle-inhibit */
     struct zwp_idle_inhibit_manager_v1 *idle_inhibit_manager;
     struct zwp_idle_inhibitor_v1 *idle_inhibitor;
 
     /* linux-dmabuf */
+    dev_t target_device_id;
     struct zwp_linux_dmabuf_v1 *dmabuf;
-    /* TODO: unvoid this if required wayland protocols is bumped to 1.24+ */
-    void *dmabuf_feedback;
-    void *format_map;
-    uint32_t format_size;
-    /* TODO: remove these once zwp_linux_dmabuf_v1 version 2 support is removed. */
-    int *drm_formats;
-    int drm_format_ct;
-    int drm_format_ct_max;
+    struct zwp_linux_dmabuf_feedback_v1 *dmabuf_feedback;
+    bool add_tranche;
+    compositor_format *compositor_format_map;
+    uint32_t compositor_format_size;
+    struct drm_format *compositor_formats;
+    int num_compositor_formats;
+    uint32_t *gpu_formats;
+    int num_gpu_formats;
 
     /* presentation-time */
     struct wp_presentation  *presentation;
     struct vo_wayland_feedback_pool *fback_pool;
     struct mp_present *present;
     int64_t refresh_interval;
+    bool present_clock;
     bool use_present;
+
+    /* single-pixel-buffer */
+    struct wp_single_pixel_buffer_manager_v1 *single_pixel_manager;
 
     /* xdg-decoration */
     struct zxdg_decoration_manager_v1 *xdg_decoration_manager;
@@ -112,23 +142,18 @@ struct vo_wayland_state {
     /* viewporter */
     struct wp_viewporter *viewporter;
     struct wp_viewport   *viewport;
+    struct wp_viewport   *cursor_viewport;
+    struct wp_viewport   *osd_viewport;
     struct wp_viewport   *video_viewport;
 
     /* Input */
-    struct wl_keyboard *keyboard;
-    struct wl_pointer  *pointer;
-    struct wl_seat     *seat;
-    struct wl_touch    *touch;
+    struct wl_list seat_list;
     struct xkb_context *xkb_context;
-    struct xkb_keymap  *xkb_keymap;
-    struct xkb_state   *xkb_state;
-    uint32_t keyboard_code;
 
     /* DND */
-    struct wl_data_device *dnd_ddev;
     struct wl_data_device_manager *dnd_devman;
     struct wl_data_offer *dnd_offer;
-    enum mp_dnd_action dnd_action;
+    int dnd_action; // actually enum mp_dnd_action
     char *dnd_mime_type;
     int dnd_fd;
     int dnd_mime_score;
@@ -139,21 +164,21 @@ struct vo_wayland_state {
     struct wl_surface      *cursor_surface;
     bool                    cursor_visible;
     int                     allocated_cursor_scale;
-    uint32_t                pointer_id;
+    struct vo_wayland_seat *last_button_seat;
 };
 
 bool vo_wayland_check_visible(struct vo *vo);
-bool vo_wayland_supported_format(struct vo *vo, uint32_t format, uint64_t modifier);
+bool vo_wayland_init(struct vo *vo);
+bool vo_wayland_reconfig(struct vo *vo);
 
 int vo_wayland_allocate_memfd(struct vo *vo, size_t size);
 int vo_wayland_control(struct vo *vo, int *events, int request, void *arg);
-int vo_wayland_init(struct vo *vo);
-int vo_wayland_reconfig(struct vo *vo);
 
-void vo_wayland_set_opaque_region(struct vo_wayland_state *wl, int alpha);
+void vo_wayland_handle_scale(struct vo_wayland_state *wl);
+void vo_wayland_set_opaque_region(struct vo_wayland_state *wl, bool alpha);
 void vo_wayland_sync_swap(struct vo_wayland_state *wl);
 void vo_wayland_uninit(struct vo *vo);
-void vo_wayland_wait_events(struct vo *vo, int64_t until_time_us);
+void vo_wayland_wait_events(struct vo *vo, int64_t until_time_ns);
 void vo_wayland_wait_frame(struct vo_wayland_state *wl);
 void vo_wayland_wakeup(struct vo *vo);
 

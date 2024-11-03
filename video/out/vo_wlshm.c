@@ -21,8 +21,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <libswscale/swscale.h>
-
 #include "osdep/endian.h"
 #include "present_sync.h"
 #include "sub/osd.h"
@@ -31,6 +29,8 @@
 #include "video/sws_utils.h"
 #include "vo.h"
 #include "wayland_common.h"
+
+#define IMGFMT_WL_RGB MP_SELECT_LE_BE(IMGFMT_BGR0, IMGFMT_0RGB)
 
 struct buffer {
     struct vo *vo;
@@ -164,7 +164,8 @@ err:
 
 static int query_format(struct vo *vo, int format)
 {
-    return sws_isSupportedInput(imgfmt2pixfmt(format));
+    struct priv *p = vo->priv;
+    return mp_sws_supports_formats(p->sws, IMGFMT_WL_RGB, format) ? 1 : 0;
 }
 
 static int reconfig(struct vo *vo, struct mp_image_params *params)
@@ -182,33 +183,51 @@ static int resize(struct vo *vo)
 {
     struct priv *p = vo->priv;
     struct vo_wayland_state *wl = vo->wl;
-    const int32_t width = wl->scaling * mp_rect_w(wl->geometry);
-    const int32_t height = wl->scaling * mp_rect_h(wl->geometry);
+    const int32_t width = mp_rect_w(wl->geometry);
+    const int32_t height = mp_rect_h(wl->geometry);
+
+    if (width == 0 || height == 0)
+        return 1;
+
     struct buffer *buf;
 
-    vo_wayland_set_opaque_region(wl, 0);
+    vo_wayland_set_opaque_region(wl, false);
     vo->want_redraw = true;
     vo->dwidth = width;
     vo->dheight = height;
     vo_get_src_dst_rects(vo, &p->src, &p->dst, &p->osd);
+
     p->sws->dst = (struct mp_image_params) {
-        .imgfmt = MP_SELECT_LE_BE(IMGFMT_BGR0, IMGFMT_0RGB),
+        .imgfmt = IMGFMT_WL_RGB,
         .w = width,
         .h = height,
         .p_w = 1,
         .p_h = 1,
     };
     mp_image_params_guess_csp(&p->sws->dst);
+    mp_mutex_lock(&vo->params_mutex);
+    vo->target_params = &p->sws->dst;
+    mp_mutex_unlock(&vo->params_mutex);
+
     while (p->free_buffers) {
         buf = p->free_buffers;
         p->free_buffers = buf->next;
         talloc_free(buf);
     }
+
+    vo_wayland_handle_scale(wl);
+
     return mp_sws_reinit(p->sws);
 }
 
 static int control(struct vo *vo, uint32_t request, void *data)
 {
+    switch (request) {
+    case VOCTRL_SET_PANSCAN:
+        resize(vo);
+        return VO_TRUE;
+    }
+
     int events = 0;
     int ret = vo_wayland_control(vo, &events, request, data);
 
@@ -280,7 +299,7 @@ static void flip_page(struct vo *vo)
                              vo->dheight);
     wl_surface_commit(wl->surface);
 
-    if (!wl->opts->disable_vsync)
+    if (!wl->opts->wl_disable_vsync)
         vo_wayland_wait_frame(wl);
 
     if (wl->use_present)

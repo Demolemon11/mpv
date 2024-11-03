@@ -62,15 +62,10 @@ void mp_ass_set_style(ASS_Style *style, double res_y,
     style->FontSize = opts->font_size * scale;
     style->PrimaryColour = MP_ASS_COLOR(opts->color);
     style->SecondaryColour = style->PrimaryColour;
-    style->OutlineColour = MP_ASS_COLOR(opts->border_color);
-    if (opts->back_color.a) {
-        style->BackColour = MP_ASS_COLOR(opts->back_color);
-        style->BorderStyle = 4; // opaque box
-    } else {
-        style->BackColour = MP_ASS_COLOR(opts->shadow_color);
-        style->BorderStyle = 1; // outline
-    }
-    style->Outline = opts->border_size * scale;
+    style->OutlineColour = MP_ASS_COLOR(opts->outline_color);
+    style->BackColour = MP_ASS_COLOR(opts->back_color);
+    style->BorderStyle = opts->border_style;
+    style->Outline = opts->outline_size * scale;
     style->Shadow = opts->shadow_offset * scale;
     style->Spacing = opts->spacing * scale;
     style->MarginL = opts->margin_x * scale;
@@ -121,6 +116,7 @@ static const int map_ass_level[] = {
     MSGL_TRACE,         // 7 "verbose DEBUG"
 };
 
+PRINTF_ATTRIBUTE(2, 0)
 static void message_callback(int level, const char *format, va_list va, void *ctx)
 {
     struct mp_log *log = ctx;
@@ -132,9 +128,12 @@ static void message_callback(int level, const char *format, va_list va, void *ct
     mp_msg(log, level, "\n");
 }
 
-ASS_Library *mp_ass_init(struct mpv_global *global, struct mp_log *log)
+ASS_Library *mp_ass_init(struct mpv_global *global,
+                         struct osd_style_opts *opts, struct mp_log *log)
 {
-    char *path = mp_find_config_file(NULL, global, "fonts");
+    char *path = opts->fonts_dir && opts->fonts_dir[0] ?
+                 mp_get_user_path(NULL, global, opts->fonts_dir) :
+                 mp_find_config_file(NULL, global, "fonts");
     mp_dbg(log, "ASS library version: 0x%x (runtime 0x%x)\n",
            (unsigned)LIBASS_VERSION, ass_library_version());
     ASS_Library *priv = ass_library_init();
@@ -338,7 +337,7 @@ static bool pack_rgba(struct mp_ass_packer *p, struct sub_bitmaps *res)
 // repacks all images). preferred_osd_format can be set to a desired
 // sub_bitmap_format. Currently, only SUBBITMAP_LIBASS is supported.
 void mp_ass_packer_pack(struct mp_ass_packer *p, ASS_Image **image_lists,
-                        int num_image_lists, bool image_lists_changed,
+                        int num_image_lists, bool image_lists_changed, bool video_color_space,
                         int preferred_osd_format, struct sub_bitmaps *out)
 {
     int format = preferred_osd_format == SUBBITMAP_BGRA ? SUBBITMAP_BGRA
@@ -358,6 +357,7 @@ void mp_ass_packer_pack(struct mp_ass_packer *p, ASS_Image **image_lists,
         .change_id = image_lists_changed,
         .format = SUBBITMAP_LIBASS,
         .parts = p->cached_parts,
+        .video_color_space = video_color_space,
     };
 
     for (int n = 0; n < num_image_lists; n++) {

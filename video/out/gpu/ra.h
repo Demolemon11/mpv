@@ -143,8 +143,8 @@ struct ra_tex_params {
                             // be true depends on ra_format.linear_filter)
     bool src_repeat;        // if false, clamp texture coordinates to edge
                             // if true, repeat texture coordinates
-    bool non_normalized;    // hack for GL_TEXTURE_RECTANGLE OSX idiocy
-                            // always set to false, except in OSX code
+    bool non_normalized;    // hack for GL_TEXTURE_RECTANGLE macOS idiocy
+                            // always set to false, except in macOS code
     bool external_oes;      // hack for GL_TEXTURE_EXTERNAL_OES idiocy
     // If non-NULL, the texture will be created with these contents. Using
     // this does *not* require setting host_mutable. Otherwise, the initial
@@ -408,7 +408,7 @@ struct ra_fns {
     void (*tex_destroy)(struct ra *ra, struct ra_tex *tex);
 
     // Upload data to a texture. This is an extremely common operation. When
-    // using a buffer, the contants of the buffer must exactly match the image
+    // using a buffer, the contents of the buffer must exactly match the image
     // - conversions between bit depth etc. are not supported. The buffer *may*
     // be marked as "in use" while this operation is going on, and the contents
     // must not be touched again by the API user until buf_poll returns true.
@@ -461,7 +461,7 @@ struct ra_fns {
 
     // Copy a sub-rectangle from one texture to another. The source/dest region
     // is always within the texture bounds. Areas outside the dest region are
-    // preserved. The formats of the textures must be losely compatible. The
+    // preserved. The formats of the textures must be loosely compatible. The
     // dst texture can be a swapchain framebuffer, but src can not. Only 2D
     // textures are supported.
     // The textures must have blit_src and blit_dst set, respectively.

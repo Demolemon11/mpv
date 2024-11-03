@@ -17,11 +17,8 @@
 
 #include <assert.h>
 #include <string.h>
-#include <strings.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
-#include <dirent.h>
 #include <math.h>
 
 #include <lua.h>
@@ -56,28 +53,37 @@
 // All these are generated from player/lua/*.lua
 static const char * const builtin_lua_scripts[][2] = {
     {"mp.defaults",
-#   include "generated/player/lua/defaults.lua.inc"
+#   include "player/lua/defaults.lua.inc"
     },
     {"mp.assdraw",
-#   include "generated/player/lua/assdraw.lua.inc"
+#   include "player/lua/assdraw.lua.inc"
+    },
+    {"mp.fzy",
+#   include "player/lua/fzy.lua.inc"
+    },
+    {"mp.input",
+#   include "player/lua/input.lua.inc"
     },
     {"mp.options",
-#   include "generated/player/lua/options.lua.inc"
+#   include "player/lua/options.lua.inc"
     },
     {"@osc.lua",
-#   include "generated/player/lua/osc.lua.inc"
+#   include "player/lua/osc.lua.inc"
     },
     {"@ytdl_hook.lua",
-#   include "generated/player/lua/ytdl_hook.lua.inc"
+#   include "player/lua/ytdl_hook.lua.inc"
     },
     {"@stats.lua",
-#   include "generated/player/lua/stats.lua.inc"
+#   include "player/lua/stats.lua.inc"
     },
     {"@console.lua",
-#   include "generated/player/lua/console.lua.inc"
+#   include "player/lua/console.lua.inc"
     },
     {"@auto_profiles.lua",
-#   include "generated/player/lua/auto_profiles.lua.inc"
+#   include "player/lua/auto_profiles.lua.inc"
+    },
+    {"@select.lua",
+#   include "player/lua/select.lua.inc"
     },
     {0}
 };
@@ -123,7 +129,7 @@ static void mp_lua_optarg(lua_State *L, int arg)
 
 // autofree: avoid leaks if a lua-error occurs between talloc new/free.
 // If a lua c-function does a new allocation (not tied to an existing context),
-// and an uncaught lua-error occures before "free" - the allocation is leaked.
+// and an uncaught lua-error occurs before "free" - the allocation is leaked.
 
 // autofree lua C function: same as lua_CFunction but with these differences:
 // - It accepts an additional void* argument - a pre-initialized talloc context
@@ -174,7 +180,7 @@ static void add_af_mpv_alloc(void *parent, char *ma)
 
 
 // Perform the equivalent of mpv_free_node_contents(node) when tmp is freed.
-static void steal_node_alloctions(void *tmp, mpv_node *node)
+static void steal_node_allocations(void *tmp, mpv_node *node)
 {
     talloc_steal(tmp, node_get_alloc(node));
 }
@@ -478,6 +484,8 @@ static int load_lua(struct mp_script_args *args)
     r = 0;
 
 error_out:
+    if (ctx->lua_allocf)
+        lua_setallocf(L, ctx->lua_allocf, ctx->lua_alloc_ud);
     if (ctx->state)
         lua_close(ctx->state);
     talloc_free(ctx);
@@ -487,10 +495,9 @@ error_out:
 static int check_loglevel(lua_State *L, int arg)
 {
     const char *level = luaL_checkstring(L, arg);
-    for (int n = 0; n < MSGL_MAX; n++) {
-        if (mp_log_levels[n] && strcasecmp(mp_log_levels[n], level) == 0)
-            return n;
-    }
+    int n = mp_msg_find_level(level);
+    if (n >= 0)
+        return n;
     luaL_error(L, "Invalid log level '%s'", level);
     abort();
 }
@@ -510,7 +517,7 @@ static int script_log(lua_State *L)
         const char *s = lua_tostring(L, -1);
         if (s == NULL)
             return luaL_error(L, "Invalid argument");
-        mp_msg(ctx->log, msgl, "%s%s", s, i > 0 ? " " : "");
+        mp_msg(ctx->log, msgl, (i == 2 ? "%s" : " %s"), s);
         lua_pop(L, 1);  // args... tostring
     }
     mp_msg(ctx->log, msgl, "\n");
@@ -552,7 +559,7 @@ static int script_raw_wait_event(lua_State *L, void *tmp)
 
     struct mpv_node rn;
     mpv_event_to_node(&rn, event);
-    steal_node_alloctions(tmp, &rn);
+    steal_node_allocations(tmp, &rn);
 
     pushnode(L, &rn); // event
 
@@ -611,6 +618,14 @@ static int script_commandv(lua_State *L)
     }
     args[num] = NULL;
     return check_error(L, mpv_command(ctx->client, args));
+}
+
+static int script_del_property(lua_State *L)
+{
+    struct script_ctx *ctx = get_ctx(L);
+    const char *p = luaL_checkstring(L, 1);
+
+    return check_error(L, mpv_del_property(ctx->client, p));
 }
 
 static int script_set_property(lua_State *L)
@@ -916,7 +931,7 @@ static int script_get_property_native(lua_State *L, void *tmp)
     mpv_node node;
     int err = mpv_get_property(ctx->client, name, MPV_FORMAT_NODE, &node);
     if (err >= 0) {
-        steal_node_alloctions(tmp, &node);
+        steal_node_allocations(tmp, &node);
         pushnode(L, &node);
         return 1;
     }
@@ -967,7 +982,7 @@ static int script_command_native(lua_State *L, void *tmp)
     makenode(tmp, &node, L, 1);
     int err = mpv_command_node(ctx->client, &node, &result);
     if (err >= 0) {
-        steal_node_alloctions(tmp, &result);
+        steal_node_allocations(tmp, &result);
         pushnode(L, &result);
         return 1;
     }
@@ -1155,7 +1170,7 @@ static int script_parse_json(lua_State *L, void *tmp)
     bool trail = lua_toboolean(L, 2);
     bool ok = false;
     struct mpv_node node;
-    if (json_parse(tmp, &node, &text, 32) >= 0) {
+    if (json_parse(tmp, &node, &text, MAX_JSON_DEPTH) >= 0) {
         json_skip_whitespace(&text);
         ok = !text[0] || trail;
     }
@@ -1177,11 +1192,11 @@ static int script_format_json(lua_State *L, void *tmp)
     char *dst = talloc_strdup(tmp, "");
     if (json_write(&dst, &node) >= 0) {
         lua_pushstring(L, dst);
-        lua_pushnil(L);
-    } else {
-        lua_pushnil(L);
-        lua_pushstring(L, "error");
+        return 1;
     }
+
+    lua_pushnil(L);
+    lua_pushstring(L, "error");
     return 2;
 }
 
@@ -1219,6 +1234,7 @@ static const struct fn_entry main_fns[] = {
     FN_ENTRY(get_property_bool),
     FN_ENTRY(get_property_number),
     AF_ENTRY(get_property_native),
+    FN_ENTRY(del_property),
     FN_ENTRY(set_property),
     FN_ENTRY(set_property_bool),
     FN_ENTRY(set_property_number),
@@ -1327,7 +1343,7 @@ static void add_functions(struct script_ctx *ctx)
 }
 
 const struct mp_scripting mp_scripting_lua = {
-    .name = "lua script",
+    .name = "lua",
     .file_ext = "lua",
     .load = load_lua,
 };

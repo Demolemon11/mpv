@@ -17,12 +17,12 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "config.h"
-
 #include <sys/types.h>
 #include <poll.h>
 #include <errno.h>
 #include <sndio.h>
+
+#include "config.h"
 
 #include "options/m_option.h"
 #include "common/msg.h"
@@ -211,18 +211,18 @@ static void uninit(struct ao *ao)
 static int control(struct ao *ao, enum aocontrol cmd, void *arg)
 {
     struct priv *p = ao->priv;
-    ao_control_vol_t *vol = arg;
+    float *vol = arg;
 
     switch (cmd) {
     case AOCONTROL_GET_VOLUME:
         if (!p->havevol)
             return CONTROL_FALSE;
-        vol->left = vol->right = p->vol * 100 / SIO_MAXVOL;
+        *vol = p->vol * 100 / SIO_MAXVOL;
         break;
     case AOCONTROL_SET_VOLUME:
         if (!p->havevol)
             return CONTROL_FALSE;
-        sio_setvol(p->hdl, vol->left * SIO_MAXVOL / 100);
+        sio_setvol(p->hdl, *vol * SIO_MAXVOL / 100);
         break;
     default:
         return CONTROL_UNKNOWN;
@@ -237,8 +237,13 @@ static void reset(struct ao *ao)
     if (p->playing) {
         p->playing = false;
 
+#if HAVE_SNDIO_1_9
+        if (!sio_flush(p->hdl)) {
+            MP_ERR(ao, "reset: couldn't sio_flush()\n");
+#else
         if (!sio_stop(p->hdl)) {
             MP_ERR(ao, "reset: couldn't sio_stop()\n");
+#endif
         }
         p->delay = 0;
         if (!sio_start(p->hdl)) {
@@ -289,7 +294,7 @@ static void get_state(struct ao *ao, struct mp_pcm_state *state)
     state->delay = p->delay / (double)p->par.rate;
 
     /* report unexpected EOF / underrun */
-    if ((state->queued_samples && state->queued_samples &&
+    if ((state->queued_samples &&
         (state->queued_samples < state->free_samples) &&
         p->playing) || sio_eof(p->hdl))
     {
@@ -298,7 +303,7 @@ static void get_state(struct ao *ao, struct mp_pcm_state *state)
                 state->free_samples, state->queued_samples, state->delay);
         p->playing = false;
         state->playing = p->playing;
-        ao_wakeup_playthread(ao);
+        ao_wakeup(ao);
     } else {
         state->playing = p->playing;
     }

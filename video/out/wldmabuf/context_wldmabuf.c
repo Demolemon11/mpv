@@ -27,11 +27,9 @@ static void uninit(struct ra_ctx *ctx)
 
 static bool init(struct ra_ctx *ctx)
 {
-    if (!vo_wayland_init(ctx->vo)) {
-        vo_wayland_uninit(ctx->vo);
+    if (!vo_wayland_init(ctx->vo))
         return false;
-    }
-    ctx->ra = ra_create_wayland(ctx->log, ctx->vo->wl->display);
+    ctx->ra = ra_create_wayland(ctx->log, ctx->vo);
 
     return true;
 }
@@ -39,7 +37,7 @@ static bool init(struct ra_ctx *ctx)
 const struct ra_ctx_fns ra_ctx_wldmabuf = {
     .type               = "none",
     .name               = "wldmabuf",
-    .hidden             = true,
+    .description        = "Wayland/DMA-BUF",
     .init               = init,
     .uninit             = uninit,
 };

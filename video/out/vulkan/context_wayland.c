@@ -36,7 +36,7 @@ static void wayland_vk_swap_buffers(struct ra_ctx *ctx)
 {
     struct vo_wayland_state *wl = ctx->vo->wl;
 
-    if (!wl->opts->disable_vsync)
+    if (!wl->opts->wl_disable_vsync)
         vo_wayland_wait_frame(wl);
 
     if (wl->use_present)
@@ -114,19 +114,17 @@ static bool resize(struct ra_ctx *ctx)
 
     MP_VERBOSE(wl, "Handling resize on the vk side\n");
 
-    const int32_t width = wl->scaling * mp_rect_w(wl->geometry);
-    const int32_t height = wl->scaling * mp_rect_h(wl->geometry);
+    const int32_t width = mp_rect_w(wl->geometry);
+    const int32_t height = mp_rect_h(wl->geometry);
 
     vo_wayland_set_opaque_region(wl, ctx->opts.want_alpha);
+    vo_wayland_handle_scale(wl);
     return ra_vk_ctx_resize(ctx, width, height);
 }
 
 static bool wayland_vk_reconfig(struct ra_ctx *ctx)
 {
-    if (!vo_wayland_reconfig(ctx->vo))
-        return false;
-
-    return true;
+    return vo_wayland_reconfig(ctx->vo);
 }
 
 static int wayland_vk_control(struct ra_ctx *ctx, int *events, int request, void *arg)
@@ -144,9 +142,9 @@ static void wayland_vk_wakeup(struct ra_ctx *ctx)
     vo_wayland_wakeup(ctx->vo);
 }
 
-static void wayland_vk_wait_events(struct ra_ctx *ctx, int64_t until_time_us)
+static void wayland_vk_wait_events(struct ra_ctx *ctx, int64_t until_time_ns)
 {
-    vo_wayland_wait_events(ctx->vo, until_time_us);
+    vo_wayland_wait_events(ctx->vo, until_time_ns);
 }
 
 static void wayland_vk_update_render_opts(struct ra_ctx *ctx)
@@ -159,6 +157,7 @@ static void wayland_vk_update_render_opts(struct ra_ctx *ctx)
 const struct ra_ctx_fns ra_ctx_vulkan_wayland = {
     .type               = "vulkan",
     .name               = "waylandvk",
+    .description        = "Wayland/Vulkan",
     .reconfig           = wayland_vk_reconfig,
     .control            = wayland_vk_control,
     .wakeup             = wayland_vk_wakeup,

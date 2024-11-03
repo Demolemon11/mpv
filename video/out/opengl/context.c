@@ -44,8 +44,8 @@ enum {
 };
 
 struct opengl_opts {
-    int use_glfinish;
-    int waitvsync;
+    bool use_glfinish;
+    bool waitvsync;
     int vsync_pattern[2];
     int swapinterval;
     int early_flush;
@@ -55,20 +55,17 @@ struct opengl_opts {
 #define OPT_BASE_STRUCT struct opengl_opts
 const struct m_sub_options opengl_conf = {
     .opts = (const struct m_option[]) {
-        {"opengl-glfinish", OPT_FLAG(use_glfinish)},
-        {"opengl-waitvsync", OPT_FLAG(waitvsync)},
-        {"opengl-swapinterval", OPT_INT(swapinterval)},
+        {"opengl-glfinish", OPT_BOOL(use_glfinish)},
+        {"opengl-waitvsync", OPT_BOOL(waitvsync)},
+        {"opengl-swapinterval", OPT_INT(swapinterval), .flags = UPDATE_VO},
         {"opengl-check-pattern-a", OPT_INT(vsync_pattern[0])},
         {"opengl-check-pattern-b", OPT_INT(vsync_pattern[1])},
-        {"opengl-restrict", OPT_REMOVED(NULL)},
         {"opengl-es", OPT_CHOICE(gles_mode,
-            {"auto", GLES_AUTO}, {"yes", GLES_YES}, {"no", GLES_NO})},
+            {"auto", GLES_AUTO}, {"yes", GLES_YES}, {"no", GLES_NO}),
+            .flags = UPDATE_VO,
+        },
         {"opengl-early-flush", OPT_CHOICE(early_flush,
             {"no", FLUSH_NO}, {"yes", FLUSH_YES}, {"auto", FLUSH_AUTO})},
-        {"opengl-debug", OPT_REPLACED("gpu-debug")},
-        {"opengl-sw", OPT_REPLACED("gpu-sw")},
-        {"opengl-vsync-fences", OPT_REPLACED("swapchain-depth")},
-        {"opengl-backend", OPT_REPLACED("gpu-context")},
         {0},
     },
     .defaults = &(const struct opengl_opts) {
@@ -227,18 +224,14 @@ bool ra_gl_ctx_start_frame(struct ra_swapchain *sw, struct ra_fbo *out_fbo)
     bool visible = true;
     if (p->params.check_visible)
         visible = p->params.check_visible(sw->ctx);
-    if (!visible)
-        return false;
 
     // If out_fbo is NULL, this was called from vo_gpu_next. Bail out.
-    if (out_fbo == NULL || !visible)
+    if (!out_fbo || !visible)
         return visible;
 
-    if (!out_fbo)
-        return true;
     *out_fbo = (struct ra_fbo) {
          .tex = p->wrapped_fb,
-         .flip = !p->params.flipped, // OpenGL FBs are normally flipped
+         .flip = !p->gl->flipped, // OpenGL FBs are normally flipped
     };
     return true;
 }
@@ -261,7 +254,7 @@ bool ra_gl_ctx_submit_frame(struct ra_swapchain *sw, const struct vo_frame *fram
     case FLUSH_AUTO:
         if (frame->display_synced)
             break;
-        // fall through
+        MP_FALLTHROUGH;
     case FLUSH_YES:
         gl->Flush();
     }

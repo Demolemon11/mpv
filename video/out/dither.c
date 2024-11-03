@@ -71,7 +71,7 @@ static void makegauss(struct ctx *k, unsigned int sizeb)
     for (unsigned int c = 0; c < k->size2; c++)
         k->gauss[c] = 0;
 
-    double sigma = -log(1.5 / UINT64_MAX * gauss_size2) / k->gauss_radius;
+    double sigma = -log(1.5 / (double) UINT64_MAX * gauss_size2) / k->gauss_radius;
 
     for (unsigned int gy = 0; gy <= k->gauss_radius; gy++) {
         for (unsigned int gx = 0; gx <= gy; gx++) {
@@ -79,7 +79,7 @@ static void makegauss(struct ctx *k, unsigned int sizeb)
             int cy = (int)gy - k->gauss_radius;
             int sq = cx * cx + cy * cy;
             double e = exp(-sqrt(sq) * sigma);
-            uint64_t v = e / gauss_size2 * UINT64_MAX;
+            uint64_t v = e / gauss_size2 * (double) UINT64_MAX;
             k->gauss[XY(k, gx, gy)] =
                 k->gauss[XY(k, gy, gx)] =
                 k->gauss[XY(k, gx, gauss_size - 1 - gy)] =
@@ -173,59 +173,3 @@ void mp_make_ordered_dither_matrix(unsigned char *m, int size)
                     m[x+y+offset[i]] = m[x+y] * 4 + (3-i) * 256/size/size;
     }
 }
-
-#if 0
-
-static int index_cmp(const void *a, const void *b)
-{
-    unsigned int x = *(const unsigned int *)a;
-    unsigned int y = *(const unsigned int *)b;
-    return x < y ? -1 : x > y;
-}
-
-static void fsck(struct ctx *k)
-{
-    qsort(k->unimat, k->size2, sizeof k->unimat[0], index_cmp);
-    for (unsigned int c = 0; c < k->size2; c++)
-        assert(k->unimat[c] == c);
-}
-
-uint16_t r[MAX_SIZE2];
-static void print(struct ctx *k)
-{
-#if 0
-    puts("#include <stdint.h>");
-    printf("static const int mp_dither_size = %d;\n", k->size);
-    printf("static const int mp_dither_size2 = %d;\n", k->size2);
-    printf("static const uint16_t mp_dither_matrix[] = {\n");
-    for(unsigned int y = 0; y < k->size; y++) {
-        printf("\t");
-        for(unsigned int x = 0; x < k->size; x++)
-            printf("%4u, ", k->unimat[XY(k, x, y)]);
-        printf("\n");
-    }
-    puts("};");
-#else
-    for(unsigned int y = 0; y < k->size; y++) {
-        for(unsigned int x = 0; x < k->size; x++)
-            r[XY(k, x, y)] = k->unimat[XY(k, x, y)];
-    }
-#endif
-}
-
-#include "osdep/timer.h"
-int main(void)
-{
-    mp_time_init();
-    struct ctx *k = calloc(1,sizeof(struct ctx));
-    int64_t s = mp_time_us();
-    makegauss(k, 6);
-    makeuniform(k);
-    print(k);
-    fsck(k);
-    int64_t l = mp_time_us() - s;
-    printf("time: %f ms\n", l / 1000.0);
-    return 0;
-}
-
-#endif

@@ -19,11 +19,11 @@
 
 #include <libavutil/hwcontext_drm.h>
 
-#include "config.h"
 #include "video/out/gpu/hwdec.h"
 
 struct dmabuf_interop {
     bool use_modifiers;
+    bool composed_layers;
 
     bool (*interop_init)(struct ra_hwdec_mapper *mapper,
                          const struct ra_imgfmt_desc *desc);
@@ -38,7 +38,7 @@ struct dmabuf_interop {
 struct dmabuf_interop_priv {
     int num_planes;
     struct mp_image layout;
-    struct ra_tex *tex[4];
+    struct ra_tex *tex[AV_DRM_MAX_PLANES];
 
     AVDRMFrameDescriptor desc;
     bool surface_acquired;

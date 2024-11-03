@@ -18,7 +18,6 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include "config.h"
 #include "dmabuf_interop.h"
 #include "video/out/placebo/ra_pl.h"
 #include "video/out/placebo/utils.h"
@@ -111,14 +110,14 @@ static bool vaapi_pl_map(struct ra_hwdec_mapper *mapper,
 
 static void vaapi_pl_unmap(struct ra_hwdec_mapper *mapper)
 {
-    for (int n = 0; n < 4; n++)
+    for (int n = 0; n < MP_ARRAY_SIZE(mapper->tex); n++)
         ra_tex_free(mapper->ra, &mapper->tex[n]);
 }
 
 bool dmabuf_interop_pl_init(const struct ra_hwdec *hw,
                             struct dmabuf_interop *dmabuf_interop)
 {
-    pl_gpu gpu = ra_pl_get(hw->ra);
+    pl_gpu gpu = ra_pl_get(hw->ra_ctx->ra);
     if (!gpu) {
         // This is not a libplacebo RA;
         return false;
