@@ -6,6 +6,8 @@ on:
       - master
       - ci
       - "release/**"
+    tags:
+      - "v*.*.*"
     paths-ignore:
       - "DOCS/**"
       - "TOOLS/lua/**"
@@ -100,6 +102,8 @@ jobs:
       - name: Post Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
           body_path: ./readme.md
           files: |
