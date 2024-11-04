@@ -90,9 +90,6 @@ jobs:
           Enter-VsDevShell -VsInstallPath $env:VS -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
           ./ci/build-win32.ps1
 
-      - name: Zip build artifacts
-        run: zip -j build/release-assets.zip build/mpv.* build/vulkan-*.dll
-
       - name: Save Cache
         uses: actions/cache/save@v4
         if: always()
@@ -100,19 +97,11 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           key: x86_64-windows-msvc-${{ steps.get_time.outputs.timestamp }}
 
-      - name: Create Release
-        uses: actions/create-release@v1
+      - name: Post Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: build/mpv.??? # 替换为实际的构件路径
-          asset_name: build/release-assets.zip # 可根据需要更改名称            asset_content_type: application/zip
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body_path: ./readme.md
+          files: |
+            ./build/mpv.*
+            ./build/vulkan-*.dll
