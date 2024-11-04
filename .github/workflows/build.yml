@@ -115,4 +115,4 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: build/mpv.??? # 替换为实际的构件路径
-          asset_name: release-assets.zip # 可根据需要更改名称            asset_content_type: application/zip
+          asset_name: build/release-assets.zip # 可根据需要更改名称            asset_content_type: application/zip
